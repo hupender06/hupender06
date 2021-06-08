@@ -1,0 +1,187 @@
+global class InboundEmailHandler implements Messaging.InboundEmailHandler {
+    global Messaging.InboundEmailResult handleInboundEmail(Messaging.InboundEmail email, Messaging.InboundEnvelope envelope) {
+        system.debug('envelope==>'+envelope);
+        Messaging.InboundEmailResult result = new Messaging.InboundEmailresult();
+        String myPlainText= email.plainTextBody;
+        system.debug('Email body --'+myPlainText);
+        Id OwnerId;
+        Id whoId;
+        
+        try {
+            //Found duplicates based on Contacts with email = from_email
+            list<Contact> conListEmail = [SELECT Id,Name,Email,Email_2__c,Email_Co_Borrower__c,ownerId FROM Contact WHERE Email = :email.fromAddress order by lastmodifieddate desc];
+            if(conListEmail.size() > 0){
+                
+                OwnerId = conListEmail[0].ownerId;
+                whoId = conListEmail[0].id;
+                //If found multiple post to chatter about this.
+                if(conListEmail.size() > 1){
+                    postToChatter(conListEmail[0].id); 
+                }
+                
+            }else{
+                //Found duplicates based on Contacts with Email_2__c = from_email
+                list<Contact> conListEmail2 = [SELECT Id,Name,Email,Email_2__c,Email_Co_Borrower__c,ownerId FROM Contact WHERE Email_2__c = :email.fromAddress order by lastmodifieddate desc];
+                if(conListEmail2.size() > 0){
+                    
+                    OwnerId = conListEmail2[0].ownerId;
+                    whoId = conListEmail2[0].id;
+                    if(conListEmail2.size() > 1){
+                        postToChatter(conListEmail2[0].id); 
+                    }
+                    
+                }else{
+                    //Found duplicates based on Contacts with Email_Co_Borrower__c = from_email
+                    list<Contact> conListCoBorrowerEmail = [SELECT Id,Name,Email,Email_2__c,Email_Co_Borrower__c,ownerId FROM Contact WHERE Email_Co_Borrower__c = :email.fromAddress order by lastmodifieddate desc];
+                    if(conListCoBorrowerEmail.size() > 0){
+                        
+                        OwnerId = conListCoBorrowerEmail[0].ownerId;
+                        whoId = conListCoBorrowerEmail[0].id;
+                        if(conListCoBorrowerEmail.size() > 1){
+                            postToChatter(conListCoBorrowerEmail[0].id); 
+                        }
+                        
+                    }else{
+                        //Found duplicates based on Leads with Email = from_email
+                        list<Lead> leadListEmail = [SELECT Id,Name,Email,Email_2__c,Email_Co_Borrower__c,ownerId FROM Lead WHERE Email = :email.fromAddress order by lastmodifieddate desc];
+                        if(leadListEmail.size() > 0){
+                            
+                            OwnerId = leadListEmail[0].ownerId;
+                            whoId = leadListEmail[0].id;
+                            if(leadListEmail.size() > 1){
+                                postToChatter(leadListEmail[0].id); 
+                            }
+                            
+                        }else{
+                            //Found duplicates based on Leads with Email_2__c = from_email
+                            
+                            list<Lead> leadListEmail2 = [SELECT Id,Name,Email,Email_2__c,Email_Co_Borrower__c,ownerId FROM Lead WHERE Email_2__c = :email.fromAddress order by lastmodifieddate desc];
+                            if(leadListEmail2.size() > 0){
+                                
+                                OwnerId = leadListEmail2[0].ownerId;
+                                whoId = leadListEmail2[0].id;
+                                if(leadListEmail2.size() > 1){
+                                    postToChatter(leadListEmail2[0].id); 
+                                } 
+                                
+                            }else{
+                                //Found duplicates based on Leads with Email_Co_Borrower__c = from_email
+                                list<Lead> leadListCoBorrowerEmail = [SELECT Id,Name,Email,Email_2__c,Email_Co_Borrower__c,ownerId FROM Lead WHERE Email_Co_Borrower__c = :email.fromAddress order by lastmodifieddate desc];
+                                if(leadListCoBorrowerEmail.size() > 0){
+                                    
+                                    OwnerId = leadListCoBorrowerEmail[0].ownerId;
+                                    whoId = leadListCoBorrowerEmail[0].id;
+                                    if(leadListCoBorrowerEmail.size() > 1){
+                                        postToChatter(leadListCoBorrowerEmail[0].id); 
+                                    } 
+                                    
+                                }
+                            }
+                        }
+                        
+                    }
+                }
+                
+            }
+            
+            //Only if we found related Ownerid and whoid, create a new task.
+            Task newTask = new Task();
+            if(OwnerId != null && whoId != null){
+                
+                
+                newTask.Priority = 'Normal';
+                newTask.Status = 'Inbound Email';
+                newTask.Subject = 'Inbound EMAIL: '+email.subject;
+                newTask.OwnerId = OwnerId;
+                newTask.ActivityDate = system.today();
+                
+                newTask.IsReminderSet = true;
+                newTask.ReminderDateTime = DateTime.newInstance(system.today().addDays(1).year(),system.today().addDays(1).month(), system.today().addDays(1).day(), 08, 00, 00);
+                newTask.WhoId = whoId;
+                newTask.Description =  'To : '+ envelope.toAddress +'\n' +
+                    'From : '+ envelope.fromAddress + '\n' + 
+                    'Time/Date : '+system.now().format() +'\n'+
+                    'Subject : ' + email.subject +'\n'+
+                    'Body : '+ myPlainText;
+                
+                insert newTask;
+            }
+            
+            if(email.binaryAttachments != null && email.binaryAttachments.size() > 0)
+            {
+                //list<Note> lstNotes =new list<Note>();
+                
+                list<Attachment> lstAttachment = new list<Attachment>();
+                for(integer i=0; i<email.binaryAttachments.size(); i++)
+                {
+                    
+                    Attachment attachment1 =new Attachment();
+                    attachment1.OwnerId=newTask.OwnerId;
+                    attachment1.ParentId=newTask.id;
+                    
+                    attachment1.Name=email.binaryAttachments[i].filename;
+                    attachment1.Body=email.binaryAttachments[i].body;
+                    
+                    lstAttachment.add(attachment1);
+                    system.debug('attachment'+attachment1.Id);
+                    system.debug('attachment'+attachment1.ParentId);
+                    
+                }
+                insert lstAttachment;
+                // insert lstNotes;
+            }
+            if(email.textAttachments !=null )
+            {
+                list<Attachment> lstattachment1 =new list<Attachment>();
+                for(integer i=0;i<email.textAttachments.size();i++)
+                {
+                    
+                    Attachment attachment1 =new Attachment();
+                    attachment1.OwnerId=newTask.OwnerId;
+                    attachment1.ParentId=newTask.id;
+                    
+                   attachment1.Body=blob.valueOf(email.plainTextBody); 
+                    
+                    attachment1.Name=email.textAttachments[i].filename;
+                    lstattachment1.add(attachment1);
+                    system.debug('attachment'+attachment1.Id);
+                    system.debug('attachment'+attachment1.ParentId);
+                }
+                insert lstattachment1;
+            }
+            
+        }catch (QueryException e) {
+            System.debug('Query Issue: ' + e);
+        }
+        result.success = true;
+        return result;
+    }
+    
+    //method to post to chatter with Tagging someone.
+    global void postToChatter(Id recordId){
+        
+        ConnectApi.FeedItemInput feedItemInput = new ConnectApi.FeedItemInput();
+        ConnectApi.MessageBodyInput messageBodyInput = new ConnectApi.MessageBodyInput();
+        ConnectApi.TextSegmentInput textSegmentInput = new ConnectApi.TextSegmentInput();
+        
+        messageBodyInput.messageSegments = new List<ConnectApi.MessageSegmentInput>();
+        List<User> userList = [Select Id FROM User WHERE Name IN ('Rob Garcia', 'Tatiana Perez', 'Anthony Bowers')];
+        for (User u : userList) {
+            ConnectApi.MentionSegmentInput mentionSegmentInput = new ConnectApi.MentionSegmentInput();
+            mentionSegmentInput.id = u.Id;
+            messageBodyInput.messageSegments.add(mentionSegmentInput);
+        }
+        
+        textSegmentInput.text = ' A new task is inserted for a Duplicate Record. Link to the record is '+URL.getSalesforceBaseUrl().toExternalForm()+'/'+recordId;
+        messageBodyInput.messageSegments.add(textSegmentInput);
+        
+        feedItemInput.body = messageBodyInput;
+        feedItemInput.feedElementType = ConnectApi.FeedElementType.FeedItem;
+        feedItemInput.subjectId = recordId;
+        
+        if(!Test.isRunningTest()){
+            ConnectApi.FeedElement feedElement = ConnectApi.ChatterFeeds.postFeedElement(Network.getNetworkId(), feedItemInput);
+        } 
+        
+    }
+}
